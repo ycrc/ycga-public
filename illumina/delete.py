@@ -1,5 +1,5 @@
 
-import glob, itertools, os, logging, argparse, time
+import glob, itertools, os, logging, argparse, time, shutil
 
 def fltr(r):
     rn=os.path.basename(r)
@@ -7,17 +7,25 @@ def fltr(r):
         dt=int(rn[:6])
         return dt < o.cutoff
     except:
-        print ("weird %s" % r)
+        print ("weirdly named run: %s" % r)
         return False
-
+'''
 runlocs=['/ycga-ba/ba_sequencers?/sequencer?/runs/*',
 '/ycga-gpfs/sequencers/panfs/sequencers*/sequencer?/runs/*',
 '/ycga-gpfs/sequencers/illumina/sequencer?/runs/*']
 
 equiv=(
-    ("/ycga-gpfs/sequencers/panfs", "/SAY/archive/YCGA-729009-YCGA/archive/panfs"),
-    ("/ycga-ba", "/SAY/archive/YCGA-729009-YCGA/archive/ycga-ba"),
-    ("/ycga-gpfs/sequencers/illumina", "/SAY/archive/YCGA-729009-YCGA/archive/ycga-gpfs/sequencers/illumina")
+    ("/ycga-gpfs/sequencers/panfs/", "/SAY/archive/YCGA-729009-YCGA/archive/panfs/"),
+    ("/ycga-gpfs/sequencers/panfs/sequencers1/", "/SAY/archive/YCGA-729009-YCGA/archive/panfs/sequencers/"),
+    ("/ycga-ba/", "/SAY/archive/YCGA-729009-YCGA/archive/ycga-ba/"),
+    ("/ycga-gpfs/sequencers/illumina/", "/SAY/archive/YCGA-729009-YCGA/archive/ycga-gpfs/sequencers/illumina/")
+)
+'''
+
+runlocs=["/home/rob/project/tools/ycga-utils/illumina/FAKERUNS/sequencers/sequencer?/*",]
+
+equiv=(
+    ("/home/rob/project/tools/ycga-utils/illumina/FAKERUNS", "/home/rob/project/tools/ycga-utils/illumina/FAKEARCHIVE"),
 )
 
 def chkArchive(r):
@@ -26,8 +34,10 @@ def chkArchive(r):
             arun=r.replace(o,a)
             chkfile=arun+'/'+os.path.basename(r)+"_finished.txt"
             st=os.path.exists(chkfile)
-            logger.debug("check %s %s" % (chkfile, st))
-            return st
+            if st:
+                logger.debug("check %s %s ok" % (chkfile, st))
+                return chkfile
+    return None
 
 
 if __name__=='__main__':
@@ -63,13 +73,28 @@ if __name__=='__main__':
 
     oldruns=[r for r in runs if fltr(r)]
 
+    deletedcnt=0
+    deletecnt=0
+    missingcnt=0
+
     for r in oldruns:
-        if not chkArchive(r):
-            logger.error("No archive for %s" % r)
+        if not os.path.isdir(r):
+            deletedcnt+=1
+            # already deleted
+            continue
+        a=chkArchive(r);
+        if not a:
+            logger.info("No archive for %s" % r)
+            missingcnt+=1
         else:
-            logger.debug("Delete %s" % (r,))
+            logger.info("Delete %s" % (r,))
             if not o.dryrun:
-                logger.debug("Do delete")
+                shutil.rmtree(r)
+                fp=open(r, 'w')
+                fp.write("Run deleted %s\n" % time.asctime())
+                fp.write("Archive is here: %s\n" % os.path.dirname(a))
+                fp.close()
+                deletecnt+=1
 
-
+    logger.info("All done.  Previous deleted %d, Archive missing %d, Deleted now %d runs." % (deletedcnt, missingcnt, deletecnt))
 
