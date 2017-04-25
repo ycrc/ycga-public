@@ -1,5 +1,5 @@
 
-import glob, itertools, os, logging, argparse, time, shutil
+import glob, itertools, os, logging, argparse, time, shutil, subprocess
 
 def fltr(r):
     rn=os.path.basename(r)
@@ -9,7 +9,7 @@ def fltr(r):
     except:
         print ("weirdly named run: %s" % r)
         return False
-'''
+
 runlocs=['/ycga-ba/ba_sequencers?/sequencer?/runs/*',
 '/ycga-gpfs/sequencers/panfs/sequencers*/sequencer?/runs/*',
 '/ycga-gpfs/sequencers/illumina/sequencer?/runs/*']
@@ -20,6 +20,7 @@ equiv=(
     ("/ycga-ba/", "/SAY/archive/YCGA-729009-YCGA/archive/ycga-ba/"),
     ("/ycga-gpfs/sequencers/illumina/", "/SAY/archive/YCGA-729009-YCGA/archive/ycga-gpfs/sequencers/illumina/")
 )
+
 '''
 
 runlocs=["/home/rob/project/tools/ycga-utils/illumina/FAKERUNS/sequencers/sequencer?/*",]
@@ -27,6 +28,7 @@ runlocs=["/home/rob/project/tools/ycga-utils/illumina/FAKERUNS/sequencers/sequen
 equiv=(
     ("/home/rob/project/tools/ycga-utils/illumina/FAKERUNS", "/home/rob/project/tools/ycga-utils/illumina/FAKEARCHIVE"),
 )
+'''
 
 def chkArchive(r):
     for o, a in equiv:
@@ -78,7 +80,8 @@ if __name__=='__main__':
     missingcnt=0
 
     for r in oldruns:
-        if not os.path.isdir(r):
+        if r.endswith(".DELETED"):
+            logger.info("Previously deleted %s" % (r,))
             deletedcnt+=1
             # already deleted
             continue
@@ -86,15 +89,19 @@ if __name__=='__main__':
         if not a:
             logger.info("No archive for %s" % r)
             missingcnt+=1
+            continue
         else:
-            logger.info("Delete %s" % (r,))
+            logger.info("Deleting %s" % (r,))
+            deletecnt+=1
             if not o.dryrun:
+                delfp=open(r+'.DELETED', 'w')
+                delfp.write("Run deleted %s\n" % time.asctime())
+                delfp.write("Archive is here: %s\n" % os.path.dirname(a))
+                delfp.write("Files deleted:\n")
+                delfp.flush()
+                if subprocess.call(['find', r, '-ls'], stdout=delfp):
+                    logger.error("Error doing find on %s" % r)
+                delfp.close()
                 shutil.rmtree(r)
-                fp=open(r, 'w')
-                fp.write("Run deleted %s\n" % time.asctime())
-                fp.write("Archive is here: %s\n" % os.path.dirname(a))
-                fp.close()
-                deletecnt+=1
 
     logger.info("All done.  Previous deleted %d, Archive missing %d, Deleted now %d runs." % (deletedcnt, missingcnt, deletecnt))
-
