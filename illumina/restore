@@ -8,11 +8,11 @@ EPILOG='''This script provides a convenient way to unpack and decompress archive
 Runs are archived as 1 or more tarballs.  There is a main tarball containing auxillary files as well as any undetermined sequences.  Then
 there is one tarball per project that contains the actual sequencing data for the project.  Most users will only need the project tarball.
 
-To locate a run in the archive, you may find locateFlowcell useful:
-$ locateFlowcell <Pat>
+To find a run in the archive, you may find the utility locateRun useful:
+$ locateRun <Pat>
 
 e.g.
-$ locateFlowcell.py D09LVAC
+$ locateRun D09LVAC
 /SAY/archive/YCGA-729009-YCGA/archive/ycga-ba/ba_sequencers3/sequencerV/runs/120120_SN827_0096_BD09LVACXX
 
 $ ls -1 /SAY/archive/YCGA-729009-YCGA/archive/ycga-ba/ba_sequencers3/sequencerV/runs/120120_SN827_0096_BD09LVACXX
