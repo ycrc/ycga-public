@@ -1,9 +1,55 @@
+#!/bin/env python
+
 from subprocess import Popen, PIPE
 import tarfile, logging, threading, time, argparse
 
+EPILOG='''This script provides a convenient way to unpack and decompress archived sequencer datasets to a scratch directory.  
+
+Runs are archived as 1 or more tarballs.  There is a main tarball containing auxillary files as well as any undetermined sequences.  Then
+there is one tarball per project that contains the actual sequencing data for the project.  Most users will only need the project tarball.
+
+To locate a run in the archive, you may find locateFlowcell useful:
+$ locateFlowcell <Pat>
+
+e.g.
+$ locateFlowcell.py D09LVAC
+/SAY/archive/YCGA-729009-YCGA/archive/ycga-ba/ba_sequencers3/sequencerV/runs/120120_SN827_0096_BD09LVACXX
+
+$ ls -1 /SAY/archive/YCGA-729009-YCGA/archive/ycga-ba/ba_sequencers3/sequencerV/runs/120120_SN827_0096_BD09LVACXX
+120120_SN827_0096_BD09LVACXX_0.tar
+120120_SN827_0096_BD09LVACXX_1_Project_Mkc7.tar
+120120_SN827_0096_BD09LVACXX_2016_05_23_20:03:21_archive.log
+120120_SN827_0096_BD09LVACXX_2_Project_Mp686.tar
+120120_SN827_0096_BD09LVACXX_3_Project_Ram98.tar
+120120_SN827_0096_BD09LVACXX_4_Project_Skr2.tar
+120120_SN827_0096_BD09LVACXX_5_Project_Bg292.tar
+120120_SN827_0096_BD09LVACXX_6_Project_Vs236.tar
+120120_SN827_0096_BD09LVACXX_finished.txt
+
+To restore, for example, 120120_SN827_0096_BD09LVACXX_5_Project_Bg292.tar
+$ cd ~/scratch60/mydata
+$ restore -t /SAY/archive/YCGA-729009-YCGA/archive/ycga-ba/ba_sequencers3/sequencerV/runs/120120_SN827_0096_BD09LVACXX/120120_SN827_0096_BD09LVACXX_5_Project_Bg292.tar
+
+By default:
+  It will restore to the current directory.
+  It will uncompress files.
+  20 threads will be used for decompression.  You should execute this script on a compute node with the desired number 
+    of cpus allocated for best decompression performance, e.g.:
+    srun -c 20 bash
+
+You can change the number of threads used for decompression using -n to restore, and -c to sbatch/srun.  If you run multiple threads, make sure to ask for more than the default
+memory.
+
+Note that the first step in the restore is to retrieve the tarball from the tape.  This can take several minutes, during which time nothing will appear to be happening.
+
+A convenient way to restore a number of tarfiles is to create a file containing the names of tarfiles, one per line, and pass it to restore using -f.  
+To uncompress multiple tarfiles listed in a file "tarfile.txt"
+restore -f tarfile.txt
+
+Contact robert.bjornson@yale.edu with questions or comments.
+
 '''
-This thread object converts fn to a temp file
-'''
+
 class quipjob(threading.Thread):
     def __init__(self, tfname, qfname, dest):
         threading.Thread.__init__(self)
@@ -51,14 +97,16 @@ QUIP="/ycga-gpfs/apps/hpc/Tools/quip/1.1.8/bin/quip"
 def doQuip(tfname, qfname, dest):
     logger.debug("doing %s" % qfname)
     newfn=qfname.replace(".qp", "")
-    tarcmd="tar xf %s -O %s" % (tfname, qfname)
-    quipcmd="%s -d -c -o fastq" % (QUIP, )
-    p1=Popen(tarcmd, shell=True, stdout=PIPE)
-    p2=Popen(quipcmd, shell=True, stdin=p1.stdout, stdout=open(dest+'/'+newfn, 'w'))
-    p2.wait()
-    p1.wait()
-    logger.debug("finished %s" % newfn)
-    return p2.returncode
+    tarcmd=["tar", "-x", "-f", tfname, "-O", qfname]
+    quipcmd=[QUIP, "-d", "-c", "-o", "fastq"]
+    p1=Popen(tarcmd, stdout=PIPE)
+    p2=Popen(quipcmd, stdin=p1.stdout, stdout=open(dest+'/'+newfn, 'w'))
+    p1.stdout.close() # parent closes this.  This important so that P1 gets a sigpipe if P2 dies
+    ret2=p2.wait()
+    if ret2:
+        logger.error("Error code %d from: %s" % (ret2, quipcmd))
+    logger.debug("finished %s return val %d" % (newfn, ret2))
+    return ret2
 
 def doTarfile(tfname, dest):
     logger.info("Processing Tarfile %s" % tfname)
@@ -66,7 +114,7 @@ def doTarfile(tfname, dest):
     qpjobs=[]
     nonqpfiles=[]
     for ti in tf:
-        if ti.name.endswith(".qp"):
+        if ti.name.endswith(".qp") and not o.no_uncompress:
             qpjobs.append(quipjob(tfname, ti.name, dest))
         else:
             nonqpfiles.append(ti)
@@ -81,12 +129,13 @@ def error(msg):
 
 if __name__=='__main__':
 
-    parser=argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter)
-
+    parser=argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter, epilog=EPILOG)
+    
     parser.add_argument("-t", "--tarfile", dest="tarfile",  help="tarfile to restore")
     parser.add_argument("-f", "--files", dest="tarfiles", help="file containing tarfiles to restore")
     parser.add_argument("-d", "--destdir", dest="destdir", default=".", help="destination dir")
     parser.add_argument("-l", "--logfile", dest="logfile", default="restore", help="logfile prefix")
+    parser.add_argument("--no_uncompress", dest="no_uncompress", action="store_true", default=False, help="leave compressed (quip) files as is")
     parser.add_argument("-v", "--verbose", dest="verbose", action="store_true", default=False, help="be verbose")
     parser.add_argument("-n", dest="maxthds", type=int, default=20, help="max threads")
 
