@@ -1,5 +1,4 @@
-
-import glob, itertools, os, logging, argparse, time, shutil, subprocess
+import glob, itertools, os, logging, argparse, time, shutil, subprocess, re
 
 def fltr(r):
     rn=os.path.basename(r)
@@ -50,6 +49,8 @@ if __name__=='__main__':
     parser.add_argument("-n", "--dryrun", dest="dryrun", action="store_true", default=False, help="don't actually delete")
     parser.add_argument("-l", "--logfile", dest="logfile", default="delete", help="logfile prefix")
     parser.add_argument("-v", "--verbose", dest="verbose", action="store_true", default=False, help="be verbose")
+    parser.add_argument("-i", "--interactive", dest="interactive", action="store_true", default=False, help="ask before each deletion")
+    parser.add_argument("-p", "--pattern", dest="pattern", default=".*", help="delete runs matching pattern")
 
     o=parser.parse_args()
     starttime=time.time()
@@ -73,13 +74,16 @@ if __name__=='__main__':
 
     runs=itertools.chain.from_iterable([glob.glob(loc) for loc in runlocs])
 
-    oldruns=[r for r in runs if fltr(r)]
+    delruns=[r for r in runs if fltr(r)]
 
+    pat=re.compile(o.pattern)
+    delruns=[r for r in delruns if pat.search(r)]
+    
     deletedcnt=0
     deletecnt=0
     missingcnt=0
 
-    for r in oldruns:
+    for r in delruns:
         if r.endswith(".DELETED"):
             logger.info("Previously deleted %s" % (r,))
             deletedcnt+=1
@@ -92,6 +96,11 @@ if __name__=='__main__':
             continue
         else:
             logger.info("Deleting %s" % (r,))
+            if o.interactive:
+                print ("Go ahead [Yn]?")
+                resp=input()
+                if resp.lower()=='n': continue
+
             deletecnt+=1
             if not o.dryrun:
                 delfp=open(r+'.DELETED', 'w')

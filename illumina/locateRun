@@ -1,11 +1,11 @@
-#!/home/rob/Installed/anaconda3/bin/python
+#!/bin/env python
 
 import glob, sys
 
 runlocs=["/ycga-gpfs/sequencers/panfs/sequencers*",
 "/SAY/archive/YCGA-729009-YCGA/archive/panfs/sequencers*",
-"/ycga-ba/sequencers*",
-"/SAY/archive/YCGA-729009-YCGA/archive/ycga-ba/sequencers*",
+"/ycga-ba/ba_sequencers?",
+"/SAY/archive/YCGA-729009-YCGA/archive/ycga-ba/ba_sequencers?",
 "/ycga-gpfs/sequencers/illumina",
 "/SAY/archive/YCGA-729009-YCGA/archive/ycga-gpfs/sequencers/illumina"
 ]
