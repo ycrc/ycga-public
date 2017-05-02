@@ -1,7 +1,7 @@
 #!/bin/env python
 
 from subprocess import Popen, PIPE
-import tarfile, logging, threading, time, argparse
+import tarfile, logging, threading, time, argparse, os, errno
 
 EPILOG='''This script provides a convenient way to unpack and decompress archived sequencer datasets to a scratch directory.  
 
@@ -93,9 +93,23 @@ def processJobs(jobs, maxthds):
         logger.debug("job %s finished, time %f" % (waitjob, time.time()-waitjob.starttime))
         del waitjob
 
+
+def mkdir_p(path):
+    try:
+        os.makedirs(path)
+    except OSError as exc:  # Python >2.5
+        if exc.errno == errno.EEXIST and os.path.isdir(path):
+            pass
+        else:
+            raise
+
 QUIP="/ycga-gpfs/apps/hpc/Tools/quip/1.1.8/bin/quip"
 def doQuip(tfname, qfname, dest):
     logger.debug("doing %s" % qfname)
+    pth=os.path.dirname(qfname)
+    if not os.path.isdir(pth):
+        logger.debug("making dir %s" % pth)
+        mkdir_p(pth)
     newfn=qfname.replace(".qp", "")
     tarcmd=["tar", "-x", "-f", tfname, "-O", qfname]
     quipcmd=[QUIP, "-d", "-c", "-o", "fastq"]
