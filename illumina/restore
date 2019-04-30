@@ -1,7 +1,7 @@
 #!/bin/env python
 
 from subprocess import Popen, PIPE
-import tarfile, logging, threading, time, argparse, os, errno
+import tarfile, logging, threading, time, argparse, os, errno, glob
 
 EPILOG='''This script provides a convenient way to unpack and decompress archived sequencer datasets to a scratch directory.  
 
@@ -90,7 +90,7 @@ def processJobs(jobs, maxthds):
         if waitjob.status:
             error("Job failed, terminating")
 
-        logger.debug("job %s finished, time %f" % (waitjob, time.time()-waitjob.starttime))
+        logger.debug("job finished time %f: %s" % (time.time()-waitjob.starttime, waitjob))
         del waitjob
 
 
@@ -124,6 +124,8 @@ def doQuip(tfname, qfname, dest):
 
 def doTarfile(tfname, dest):
     logger.info("Processing Tarfile %s" % tfname)
+    if o.dryrun:
+        return
     tf=tarfile.TarFile.open(tfname)
     qpjobs=[]
     nonqpfiles=[]
@@ -145,13 +147,14 @@ if __name__=='__main__':
 
     parser=argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter, epilog=EPILOG)
     
-    parser.add_argument("-t", "--tarfile", dest="tarfile",  help="tarfile to restore")
-    parser.add_argument("-f", "--files", dest="tarfiles", help="file containing tarfiles to restore")
+    parser.add_argument("-t", "--tarfile", dest="tarfile",  help="tarfile or entire run to restore")
+    parser.add_argument("-f", "--files", dest="tarfiles", help="file containing tarfiles or runs to restore")
     parser.add_argument("-d", "--destdir", dest="destdir", default=".", help="destination dir")
     parser.add_argument("-l", "--logfile", dest="logfile", default="restore", help="logfile prefix")
     parser.add_argument("--no_uncompress", dest="no_uncompress", action="store_true", default=False, help="leave compressed (quip) files as is")
     parser.add_argument("-v", "--verbose", dest="verbose", action="store_true", default=False, help="be verbose")
     parser.add_argument("-n", dest="maxthds", type=int, default=20, help="max threads")
+    parser.add_argument("--dryrun", dest="dryrun", action="store_true", default=False, help="Don't do anything")
 
     o=parser.parse_args()
     starttime=time.time()
@@ -177,10 +180,19 @@ if __name__=='__main__':
         error("Please specify -t or -f")
 
     if o.tarfile:
-        doTarfile(o.tarfile, o.destdir)
+        if os.path.isdir(o.tarfile):
+            for tf in glob.glob(os.path.join(o.tarfile, "*.tar")):
+                doTarfile(tf, o.destdir)
+        else:
+            doTarfile(o.tarfile, o.destdir)
     elif o.tarfiles:
         for tfname in open(o.tarfiles):
-            doTarfile(tfname.strip(), o.destdir)
+            tfname=tfname.strip()
+            if os.path.isdir(tfname):
+                for tf in glob.glob(os.path.join(tfname, "*.tar")):
+                    doTarfile(tf.strip(), o.destdir)
+            else:
+                doTarfile(tfname.strip(), o.destdir)
 
     t = time.time() - starttime
 
