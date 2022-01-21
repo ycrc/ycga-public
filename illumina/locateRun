@@ -7,7 +7,8 @@ runlocs=["/ycga-gpfs/sequencers/panfs/sequencers*",
 "/ycga-ba/ba_sequencers?",
 "/SAY/archive/YCGA-729009-YCGA/archive/ycga-ba/ba_sequencers?",
 "/ycga-gpfs/sequencers/illumina",
-"/SAY/archive/YCGA-729009-YCGA/archive/ycga-gpfs/sequencers/illumina"
+"/SAY/archive/YCGA-729009-YCGA/archive/ycga-gpfs/sequencers/illumina",
+"/SAY/archive/YCGA-729009-YCGA-A2/archive/ycga-gpfs/sequencers/illumina"
 ]
 
 USAGE='''
