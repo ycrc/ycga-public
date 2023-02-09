@@ -1,0 +1,67 @@
+#!/bin/env python3
+
+''' examples
+http://fcb.ycrc.yale.edu:3010/lr442d3SV1pRkkeUiwG2P86RvqNZ6/083018-combine
+http://fcp.ycrc.yale.edu:3010/DaTOYPgEpzVBEXWbhscBXN5jCbHWM/071921
+
+'''
+
+usage='''
+Usage: resolveURL.py url
+
+This script takes an http://fcb.ycrc.yale.edu extern link URL pointing to sequencing data, e.g.:
+http://fcb.ycrc.yale.edu:3010/vnasjfasdkvafasfd/Data
+and attempts to locate the actual data on Ruddle
+'''
+
+
+from pathlib import Path
+import sys, re, os
+
+pat=re.compile('^(/gpfs/ycga/sequencers/pacbio/gw92/10x/)([^/]+/)([^/]+)(/.+)$')
+
+if len(sys.argv) != 2:
+    print(usage)
+    sys.exit(0)
+
+url=sys.argv[1]
+pre='/gpfs/ycga/project/lsprog/tools/external/data/'
+mo=re.match(r'^http://[^/]+:3010/([^/]+)/([^/]+)$', url)
+if not mo:
+    print("Bad URL!  Cannot resolve")
+    sys.exit(1)
+
+print("Resolving:", url)
+
+stagingpath=pre+'/'.join(mo.groups())
+
+
+tpath=Path(stagingpath).resolve()
+if os.path.isdir(tpath):
+    print("Staging Location:", stagingpath)
+    print("True Path:", tpath)
+else:
+    print("That URL doesn't exist:", url)
+    sys.exit(1)
+
+print("Checking contents")
+for d in os.listdir(tpath):
+    print("Found:", d)
+    lpath=(str(tpath)+'/'+d)
+    tmppath=Path(lpath).resolve()
+    print("True location:", str(tmppath))
+    mo=pat.match(str(tmppath))
+    if mo:
+        p10x,pType,pSubdir,pRest=mo.groups()
+        prefix=p10x+pType+pSubdir
+        if os.path.isdir(prefix):
+            print("OK", tpath)
+        elif os.path.exists(prefix+".deleted"):
+            sys.stdout.write("".join(open(prefix+".deleted").readlines()[1:]))
+        else:
+            print("Huh?")
+    print()
+
+
+
+
