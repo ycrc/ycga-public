@@ -16,7 +16,16 @@ and attempts to locate the actual data on Ruddle
 
 
 from pathlib import Path
-import sys, re, os
+import sys, re, os, glob
+
+def findArchive(path):
+    if not path: return Null
+
+    tmppath=path.replace('/gpfs/gibbs/pi/ycga', '/SAY/archive/YCGA-729009-YCGA-A2/archive')+"*"
+    afile=glob.glob(tmppath) 
+    if afile:
+        return afile
+    return findArchive(os.path.dirname(path))
 
 pat=re.compile('^(/gpfs/ycga/sequencers/pacbio/gw92/10x/)([^/]+/)([^/]+)(/.+)$')
 
@@ -33,12 +42,11 @@ if not mo:
 
 print("Resolving:", url)
 
-stagingpath=pre+'/'.join(mo.groups())
+staginglink=pre+'/'.join(mo.groups())
 
-
-tpath=Path(stagingpath).resolve()
+tpath=Path(staginglink).resolve()
 if os.path.isdir(tpath):
-    print("Staging Location:", stagingpath)
+    print("Staging Location:", staginglink)
     print("True Path:", tpath)
 else:
     print("That URL doesn't exist:", url)
@@ -46,7 +54,34 @@ else:
 
 print("Checking contents")
 for d in os.listdir(tpath):
-    print("Found:", d)
+    dpath=str(tpath)+'/'+d
+    print(f'Looking for {dpath}')
+    if os.path.isfile(dpath): 
+        print("Found:", dpath)
+        continue
+    if os.path.islink(dpath):
+       tmppath = Path(dpath).resolve()
+       if tmppath.exists():
+           print("Found:", tmppath)
+       else:
+           # try to find an archive
+           apth=findArchive(str(tmppath))
+           if apth:
+               print(f'Found archive {apth}')
+
+
+''' example
+/gpfs/gibbs/pi/ycga/pacbio/gw92/10x/Single_Cell/am3447/20211012_am3447_vdj/HMJVCDSX2/2_NB_VMT_S2_L002_R3_001.fastq.gz
+
+/SAY/archive/YCGA-729009-YCGA-A2/archive/pacbio/gw92/10x/Single_Cell/am3447/20211012_am3447_vdj.tar
+
+sub /gpfs/gibbs/pi/ycga by /SAY/archive/YCGA-729009-YCGA-A2/archive and append 
+
+'''
+
+
+
+'''
     lpath=(str(tpath)+'/'+d)
     tmppath=Path(lpath).resolve()
     print("True location:", str(tmppath))
@@ -61,7 +96,7 @@ for d in os.listdir(tpath):
         else:
             print("Huh?")
     print()
-
+'''
 
 
 
