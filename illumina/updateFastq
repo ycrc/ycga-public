@@ -1,0 +1,381 @@
+#!/usr/bin/env python
+
+import sys
+import datetime
+import getpass
+import os
+import re
+import subprocess
+import tempfile
+import shutil
+
+OLDPANFSROOT="/gpfs/project/ycga/data"
+PANFSROOT="/gpfs/ycga/sequencers"
+
+ARCHIVEROOT="/SAY/archive/YCGA-729009-YCGA-A2/archive"
+
+noNoticeFlag = False
+silentFlag = False
+arg = 1
+if arg < len(sys.argv) and sys.argv[arg] == "-f":
+   silentFlag = True
+   arg += 1
+elif arg < len(sys.argv) and sys.argv[arg] == "-n":
+   noNoticeFlag = True
+   arg += 1
+
+if len(sys.argv) - arg < 1:
+   sys.stderr.write("Usage:  updateFastq sampleDir...\n")
+   sys.stderr.write("          Updates the symbolic links to the FASTQ files in the Unaligned directories, for\n")
+   sys.stderr.write("          past changes to the locations where YCGA sequencing data is stored.  Also, identifies\n")
+   sys.stderr.write("          run data that has been written to tape archive, and on request, will perform a\n")
+   sys.stderr.write("          retrieval of those files from tape, storing the retrieved FASTQ files in the\n")
+   sys.stderr.write("          sampleDir/Unaligned directories (so that these directories are now correctly setup\n")
+   sys.stderr.write("          for use in analysis pipelines.\n")
+   sys.exit(-1)
+
+errFlag = False
+for dir in sys.argv[arg:]:
+    if dir.endswith("/"):
+       dir = dir[:-1]
+
+    if not os.path.isdir(dir) or not os.path.isdir(dir + "/Unaligned"):
+       sys.stderr.write("Error:  Cannot find directory:  %s/Unaligned\n" % dir)
+       errFlag = True
+if errFlag:
+   sys.exit(-1)
+
+restorelist = []
+
+for dir in sys.argv[arg:]:
+   if dir.endswith("/"):
+      dir = dir[:-1]
+
+   files = {}
+   udir = dir + "/Unaligned"
+   for file in os.listdir(udir):
+      if file.endswith("fastq.gz") or file.endswith("fastq.qp"):
+         if file not in files:
+            files[file] = [ file, "" ]
+         else:
+            files[file][0] = file
+      elif file.endswith("fastq.gz.link") or file.endswith("fastq.qp.link"):
+         name = file[:-5]
+         if name not in files:
+            files[name] = [ "", file ]
+         else:
+            files[name][1] = file
+
+   if len(files) == 0:
+      sys.stderr.write("Error:  No fastq files found in directory: %s\n" % udir)
+      sys.exit(-1)
+
+   updatecnt = 0
+   linkcnt = 0
+   for name in files:
+      (file, link) = files[name]
+
+      # If the fastq file and the .link file are both there, then the fastq file better be real.
+
+      if file and link:
+         fpath = udir + "/" + file
+         if os.path.isfile(fpath):
+            continue
+
+         sys.stderr.write("Error:  Found .link file, but FASTQ file is not a real file:  %s\n" % (fpath))
+         sys.exit(-1)
+
+      # If the fastq file is there (as a real file or a symbolic link), but the .link file is not
+      # (which could be because (1) the run has not been archived, and so the file should be real,
+      # (2) the run was from the old panfs area, so the path needs to be updated, or (3) the run
+      # was archived since the link was created, so we need to make a .link file from it).
+
+      if file:
+         fpath = udir + "/" + file
+         if os.path.isfile(fpath):
+            continue
+
+         if not os.path.islink(fpath):
+            sys.stderr.write("Error:  FASTQ not a file or symbolic link:  %s\n" % (fpath))
+            sys.exit(-1)
+
+         # If the "fastq file" is really a symbolic link, if it points at a real file, then
+         # nothing more needs to be done.
+
+         absfpath = os.path.abspath(fpath)
+
+         dest = os.readlink(fpath)
+         if os.path.isfile(dest):
+            continue
+
+         # If the destination file is not there, check that the path conversion does not
+         # result in finding an existing file, possibly with a Quip'ed version of the gzip file.
+
+         newdest = dest
+         if dest.startswith("/panfs/"):
+            newdest = PANFSROOT + dest
+         elif dest.startswith(OLDPANFSROOT):
+            newdest = PANFSROOT + dest.replace(OLDPANFSROOT, "")
+         elif dest.startswith("/ycga-ba/"):
+            newdest = "/gpfs/ycga/sequencers" + dest
+         elif dest.startswith("/ycga-gpfs/"):
+            newdest = dest.replace("/ycga-gpfs", "/gpfs/ycga")
+         elif dest.startswith("/sequencers/"):
+            newdest = "/gpfs/ycga" + dest
+         #elif dest.startswith("/gpfs/ycga/"):
+         #   newdest = dest.replace("/gpfs/ycga", "/ycga-gpfs")
+         
+         if os.path.isfile(newdest):
+            os.unlink(fpath)
+            os.symlink(newdest, absfpath)
+            continue
+
+         elif newdest.endswith("fastq.gz") and os.path.isfile(newdest[:-2] + "qp"):
+            newdest = newdest[:-2] + "qp"
+            absfpath = absfpath[:-2] + "qp"
+            os.unlink(fpath)
+            os.symlink(newdest, absfpath)
+            updatecnt += 1
+            continue
+      
+         # If no destination file can be found, check that the run has been deleted, and if so,
+         # make this a .link file, to prepare it for restoring from archive.
+         match = re.match("(.+)/Data/Intensities/BaseCalls", newdest)
+         if match is None:
+            sys.stderr.write("Error:  Cannot find FASTQ file destination:  %s -> %s\n" % (fpath, newdest))
+            sys.exit(-1)
+
+         runpath = match.group(1)
+         if os.path.isdir(runpath):
+            sys.stderr.write("Error:  Run path found, but FASTQ file does not exist:  %s -> %s\n" % (fpath, newdest))
+            sys.exit(-1)
+
+         if not os.path.isfile(runpath + ".DELETED") and not os.path.isdir(runpath + ".deleted"):
+            sys.stderr.write("Error:  Cannot find FASTQ file destination run:  %s -> %s\n" % (fpath, newdest))
+            sys.exit(-1)
+
+         newdest = newdest[:-2] + "qp"
+         absfpath = absfpath[:-2] + "qp"
+         os.unlink(fpath)
+         os.symlink(newdest, absfpath + ".link")
+         updatecnt += 1
+         link = file[:-2] + "qp.link"
+         file = ""
+
+      # Update links with a deprecated path.
+      lpath = udir + "/" + link
+      ldest = os.readlink(lpath)
+      if ldest.find("/ycga-gpfs/") != -1:
+         lnewdest = ldest.replace("/ycga-gpfs", "/gpfs/ycga")
+         os.unlink(lpath)
+         os.symlink(lnewdest, lpath)
+
+      # If there is a .link file, but no fastq file exists, mark it for restoration in the next phase.
+      restorelist.append((udir, link))
+      linkcnt += 1
+
+   if not (silentFlag or noNoticeFlag):
+      sys.stdout.write("%s:  Updated %d of %d files, %d files must be retrieved from archive.\n" % (dir, updatecnt, len(files), linkcnt))
+
+tarlist = set()
+runlist = []
+for t in restorelist:
+   fpath = t[0] + "/" + t[1]
+   absfpath = os.path.abspath(fpath)
+   dest = os.readlink(fpath)
+
+   match = re.match("(.+)/Data/Intensities/BaseCalls", dest)
+   if match is None:
+      sys.stderr.write("Error:  Invalid .link file destination:  %s -> %s\n" % (fpath, dest))
+      sys.exit(-1)
+
+   runpath = match.group(1)
+   unaligned = ""
+   project = ""
+
+   match = re.search("Data/Intensities/BaseCalls/(Unaligned[^/]*)/(Project_[^/]+)/Sample", dest)
+   if match is not None:
+      unaligned = match.group(1)
+      project = match.group(2)
+   else:
+      match = re.search("Data/Intensities/BaseCalls.*/GERALD", dest)
+      if match is not None:
+         unaligned = ""
+         project = ""
+      else:
+         sys.stderr.write("Error:  Invalid destination path format:  %s -> %s\n" % (fpath, dest))
+         sys.exit(-1)
+
+   match = re.search("([^/]+/Data/Intensities/BaseCalls/.*$)", dest)
+   if match is None:
+      sys.stderr.write("Error:  Invalid format of destination path:  %s -> %s\n" % (fpath, dest))
+      sys.exit(-1)
+
+   ftarpath = match.group(1)
+
+   tarlist.add((runpath, unaligned, project))
+   runlist.append((runpath, unaligned, project, ftarpath, absfpath))
+
+def runcmd(cmd):
+   p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+   out, err = p.communicate()
+   if p.returncode != 0 or err:
+      sys.stderr.write("Error:  Command failed:  {0}\n".format(cmd))
+      sys.stderr.write(out)
+      sys.stderr.write(err)
+      sys.exit(-1)
+   return out
+
+sshArchiveFlag = False
+if not os.path.isdir(ARCHIVEROOT):
+   sshArchiveFlag = True
+
+errcnt = 0
+tarfiles = []
+for (runpath, unaligned, project) in tarlist:
+   truepath = runpath
+   if truepath.startswith("/ycga-gpfs/sequencers/panfs"):
+      truepath = runpath.replace("/ycga-gpfs/sequencers/panfs", "/panfs")
+   elif truepath.startswith("/gpfs/ycga/sequencers/panfs"):
+      truepath = runpath.replace("/gpfs/ycga/sequencers/panfs", "/panfs")
+   elif truepath.startswith("/sequencers/illumina"):
+      truepath = runpath.replace("/sequencers/illumina", "/ycga-gpfs/sequencers/illumina")
+   elif truepath.startswith("/gpfs/ycga/sequencers/illumina"):
+      truepath = runpath.replace("/gpfs/ycga/sequencers/illumina", "/ycga-gpfs/sequencers/illumina")
+   elif truepath.startswith("/gpfs/ycga/sequencers/ycga-ba"):
+      truepath = runpath.replace("/gpfs/ycga/sequencers/ycga-ba", "/ycga-ba")
+   elif truepath.startswith("/ycga-gpfs/sequencers/ycga-ba"):
+      truepath = runpath.replace("/ycga-gpfs/sequencers/ycga-ba", "/ycga-ba")
+
+   archpath = ARCHIVEROOT + truepath
+
+   archfiles = []
+   if sshArchiveFlag:
+      cmd = "ssh -o StrictHostKeyChecking=no transfer /bin/ls %s/" % archpath.rstrip("/")
+      out = runcmd(cmd)
+      archfiles = out.strip().split("\n")
+   else:
+      if not os.path.isdir(archpath):
+         sys.stderr.write("Error:  Cannot find archive directory for run:  %s  (runpath=%s)\n" % (archpath, runpath))
+         sys.exit(-1)
+
+      for file in os.listdir(archpath):
+         archfiles.append(file)
+
+   tarfile = []
+   for file in archfiles:
+      if not project:
+         if file.endswith("_0.tar"):
+            tarfile.append(file)
+      else:
+         match = re.search("_\d+_%s.tar$" % project, file)
+         if match is not None:
+            tarfile.append(file)
+            continue
+
+         if unaligned:
+            match = re.search("_\d+_%s_%s.tar$" % (unaligned, project), file)
+            if match is not None:
+               tarfile.append(file)
+               
+   if not tarfile:
+      sys.stderr.write("Error:  Cannot find tarball for run and project:  %s, %s\n" % (archpath, project))
+      errcnt += 1
+      continue
+
+   for file in tarfile:
+      tarfiles.append((runpath, unaligned, project, archpath + "/" + file))
+
+if len(tarfiles) == 0:
+   sys.exit(0)
+
+if silentFlag and errcnt > 0:
+   sys.stderr.write("Error:  Only %d of %d archive tar files could be found, so retrieval cannot be completed.  Use ycgaUpdate for more details.\n" % (len(tarfiles), len(tarfiles) + errcnt))
+   sys.exit(-1)
+
+if not silentFlag:
+   if errcnt == 0:
+      sys.stdout.write("%d archive tar files must be retrieved to restore FASTQ files.  This will take some time to complete.\n" % len(tarfiles))
+   else:
+      sys.stdout.write("%d archive tar files could not be found, but %d tar files can be retrieved.  It will take some time to retrieve those files.\n" % (errcnt, len(tarfiles)))
+
+   get_input = input
+   try:
+       get_input = raw_input
+   except NameError:
+       pass
+
+   while True:
+      l = get_input("Continue (y/n)? [y] ")
+      if len(l) == 0 or l[0] == 'y' or l[0] == '\n':
+         break
+      elif l[0] == 'n':
+         sys.exit(0)
+      else:
+         sys.stdout.write("Please answer 'y' or 'n'.\n")
+
+numtarfiles = len(tarfiles)
+numfastqfiles = 0
+
+tmpdir = tempfile.mkdtemp(dir=".")
+try:
+   found = []
+   for (i, t) in enumerate(tarfiles):
+      flist = []
+      for t2 in runlist:
+          if t2[0] == t[0] and t2[1] == t2[1] and t2[2] == t[2]:
+             flist.append(t2[3])
+
+      numfastqfiles += len(flist)
+      if not silentFlag:
+         sys.stdout.write("Retrieving %d of %d (%d files)...\n" % (i+1, len(tarfiles), len(flist)))
+
+      tarfile = t[3]
+      if sshArchiveFlag:
+         cmd = "scp -o StrictHostKeyChecking=no transfer:%s %s/project.tar" % (tarfile, tmpdir)
+         out = runcmd(cmd)
+         tarfile = "%s/project.tar" % tmpdir
+
+      cmd = "tar --directory=%s -xf %s %s" % (tmpdir, tarfile, "" if len(flist) >= 18 else " ".join(flist))
+
+      p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+      out, err = p.communicate()
+      if p.returncode != 0:
+         lines = err.strip().split("\n")
+         l = [ x for x in lines if x.find("Not found in archive") == -1 and x.find("Exiting with failure status") == -1 ]
+         if len(l) > 0:
+            sys.stderr.write("Error:  Tar command failed:  {0}\n".format(cmd))
+            sys.stderr.write(out)
+            sys.stderr.write(err)
+            sys.exit(-1)
+            
+      for t2 in runlist:
+         if os.path.isfile("%s/%s" % (tmpdir, t2[3])):
+            runcmd("mv %s/%s %s" % (tmpdir, t2[3], t2[4].replace(".link", "")))
+            runcmd("chmod `umask -S | sed 's/x//g'` %s" % t2[4].replace(".link", ""))
+            found.append(t2)
+
+      runcmd("rm -rf %s/*" % tmpdir)
+finally:
+   shutil.rmtree(tmpdir)
+
+try:
+   user = getpass.getuser()
+   datestr = datetime.datetime.now().strftime("%Y%m%d_%H:%M:%S")
+   logfile = "/gpfs/ycga/project/mane/jk2269/ycgaFastq_logFiles/updateFastq.log"
+   fp = open(logfile, "at")
+   fp.write("%s\t%s\t%d tar files\t%d fastq files\n" % (user, datestr, numtarfiles, numfastqfiles))
+   fp.close()
+
+except IOError:
+   pass
+
+if len(found) == len(runlist):
+   if not silentFlag:
+      sys.stdout.write("All files retrieved.\n")
+else:
+   sys.stderr.write("Error:  %d files could not be retrieved.\n" % (len(runlist) - len(found)))
+   for t in set(runlist) - set(found):
+      sys.stderr.write("    %s\n" % t[4].replace(".link", ""))
+   sys.exit(-1)
+

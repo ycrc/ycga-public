@@ -1,0 +1,45 @@
+#!/usr/bin/env python
+
+import sys
+import os
+
+if len(sys.argv) < 3:
+    sys.stderr.write("Usage:  cpFastq sampleDir... destDir\n")
+    sys.stderr.write("           Copy the Unaligned directories, and their FASTQ files, for each sample directory to\n")
+    sys.stderr.write("           the destination directoy, while maintaining the sampleDir/Unaliged directory\n")
+    sys.stderr.write("           structure.  Also, use symbolic linking to minimize the filesize of the resulting\n")
+    sys.stderr.write("           destDir/sampleDir directories (for FASTQ files that are symbolic links, transfer\n")
+    sys.stderr.write("           the link into destDir/sampleDir/Unaligned...and for real FASTQ files in\n")
+    sys.stderr.write("           sampleDir/Unaligned, make a symbolic link in destDir/sampleDir/Unaligned to that\n")
+    sys.stderr.write("           sampleDir/Unaligned file.  In other words, the destDir/sampleDir/Unaligned directories\n")
+    sys.stderr.write("           will only contain symbolic links to any FASTQ files.\n")
+    sys.exit(-1)
+
+destDir = sys.argv[-1].rstrip("/")
+if os.path.exists(destDir + "/Unaligned"):
+    sys.stderr.write("Error:  Destination directory contains an Unaligned sub-directory...is this really a sampleDir:  %s\n" % destDir)
+    sys.exit(-1)
+
+destDir = os.path.abspath(destDir)
+
+for sample in sys.argv[1:-1]:
+    samplepath = sample.rstrip("/")
+    samplename = os.path.basename(samplepath)
+    
+    if os.path.isdir(destDir):
+        destpath = "%s/%s/Unaligned" % (destDir, samplename)
+    else:
+        destpath = destDir + "/Unaligned"
+    if not os.path.isdir(destpath):
+        os.makedirs(destpath)
+
+    udir = "%s/Unaligned" % sample
+    for file in os.listdir(udir):
+        path = udir + "/" + file
+        if os.path.islink(path):
+            path = os.readlink(path)
+        elif os.path.isfile(path):
+            pass
+        else:
+            continue
+        os.symlink(os.path.abspath(path), "%s/%s" % (destpath, file))
