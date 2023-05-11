@@ -35,7 +35,7 @@ if len(sys.argv) != 2:
 
 url=sys.argv[1]
 pre='/gpfs/ycga/project/lsprog/tools/external/data/'
-mo=re.match(r'^http://[^/]+:3010/([^/]+)/([^/]+)$', url)
+mo=re.match(r'^http://[^/]+:3010/([^/]+)/([^/]+)/?$', url)
 if not mo:
     print("Bad URL!  Cannot resolve")
     sys.exit(1)
