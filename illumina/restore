@@ -1,4 +1,4 @@
-#!/bin/env python
+#!/usr/bin/env python3
 
 from subprocess import Popen, PIPE
 import tarfile, logging, threading, time, argparse, os, errno, glob
