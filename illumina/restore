@@ -103,24 +103,39 @@ def mkdir_p(path):
         else:
             raise
 
-QUIP="/ycga-gpfs/apps/hpc/Tools/quip/1.1.8/bin/quip"
+QUIP="/vast/palmer/apps/avx2/software/Quip/1.1.8-GCCcore-10.2.0/bin/quip"
 def doQuip(tfname, qfname, dest):
     logger.debug("doing %s" % qfname)
     pth=os.path.dirname(qfname)
     if not os.path.isdir(pth):
         logger.debug("making dir %s" % pth)
         mkdir_p(pth)
-    newfn=qfname.replace(".qp", "")
+
     tarcmd=["tar", "-x", "-f", tfname, "-O", qfname]
     quipcmd=[QUIP, "-d", "-c", "-o", "fastq"]
+    gzipcmd=["gzip", "-c"]
+    
     p1=Popen(tarcmd, stdout=PIPE)
-    p2=Popen(quipcmd, stdin=p1.stdout, stdout=open(dest+'/'+newfn, 'w'))
-    p1.stdout.close() # parent closes this.  This important so that P1 gets a sigpipe if P2 dies
-    ret2=p2.wait()
-    if ret2:
-        logger.error("Error code %d from: %s" % (ret2, quipcmd))
-    logger.debug("finished %s return val %d" % (newfn, ret2))
-    return ret2
+    if o.no_recompress:
+        newfn=qfname.replace(".qp", "")
+        p2=Popen(quipcmd, stdin=p1.stdout, stdout=open(dest+'/'+newfn, 'w'))
+	# I don't understand this...			       
+        p1.stdout.close() # parent closes this.  This important so that P1 gets a sigpipe if P2 dies
+        ret=p2.wait()
+        if ret:
+            logger.error("Error code %d from: %s" % (ret, quipcmd))
+    else:
+        newfn=qfname.replace(".qp", ".gz")
+        p2=Popen(quipcmd, stdin=p1.stdout, stdout=PIPE)
+        p3=Popen(gzipcmd, stdin=p2.stdout, stdout=open(dest+'/'+newfn, 'w'))
+        p1.stdout.close() # parent closes this.  This important so that P1 gets a sigpipe if P2 dies
+        p2.stdout.close() # parent closes this.  This important so that P1 gets a sigpipe if P3 dies
+        ret=p3.wait()
+        if ret:
+            logger.error("Error code %d from: %s" % (ret, gzipcmd))
+            
+    logger.debug("finished %s return val %d" % (newfn, ret))
+    return ret
 
 def doTarfile(tfname, dest):
     logger.info("Processing Tarfile %s" % tfname)
@@ -152,6 +167,7 @@ if __name__=='__main__':
     parser.add_argument("-d", "--destdir", dest="destdir", default=".", help="destination dir")
     parser.add_argument("-l", "--logfile", dest="logfile", default="restore", help="logfile prefix")
     parser.add_argument("--no_uncompress", dest="no_uncompress", action="store_true", default=False, help="leave compressed (quip) files as is")
+    parser.add_argument("--no_recompress", dest="no_recompress", action="store_true", default=False, help="don't recompress to fastq.gz")    
     parser.add_argument("-v", "--verbose", dest="verbose", action="store_true", default=False, help="be verbose")
     parser.add_argument("-n", dest="maxthds", type=int, default=20, help="max threads")
     parser.add_argument("--dryrun", dest="dryrun", action="store_true", default=False, help="Don't do anything")
