@@ -173,7 +173,7 @@ def checkArgs(arglist):
         # If the path is not to a run directory, then the dirOrUrl must be a flowcell name, or an error
         if not checkdir(runpath):
             
-            runstr = runcmd("python /home/jk2269/binpy/getflowcells.py")
+            runstr = runcmd("python3 /home/jk2269/binpy/getflowcells.py")
             runs = [ run for run in runstr.split("\n") if run.find(runpath) != -1 ]
 
             # if 0 or multiple runs are found, report an error.
