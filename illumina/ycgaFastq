@@ -60,7 +60,9 @@ def main():
     makeDirs(samples, options['outputDir'])
 
     if archiveFlag:
-        subprocess.call("%s/updateFastq -n %s" % (BINDIR, " ".join(samples.keys())), shell=True)
+        subprocess.call("%s/updateFastq %s %s" % (BINDIR, ("-f" if options['forceFlag'] else "-n"),
+            " ".join(samples.keys())), shell=True)
+
 
 def parseArgs(options):
     options['forceFlag'] = False
