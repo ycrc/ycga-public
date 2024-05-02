@@ -1,0 +1,150 @@
+
+'''
+TODO
+need to be able to do a aws copy using my keys, without giving keys away
+
+1) setuid program that runs as me and can access my keys.
+2) hide keys in this script, maybe by compiling it?
+3) in python, parse ini file, and pass values directly to boto3 (still need to do setuid though)
+
+'''
+
+# keys will be inserted here
+KEYSXXXXXXXXXXKEYS
+
+import sys, os, argparse, re, logging, subprocess
+
+
+urlpat=re.compile('^http://fcb.ycga.yale.edu:3010/([^/]+)/([^/]+)$')
+epilog="epilog"
+
+ELData='/gpfs/ycga/project/lsprog/tools/external/data'
+ArchiveRoot='/SAY/archive/YCGA-729009-YCGA-A2/archive'
+
+
+''' Examples of target to tar:
+replace /gpfs/ycga/sequencers by /SAY/archive/YCGA-729009-YCGA-A2/archive and append .tar?
+
+/gpfs/ycga/sequencers/pacbio/data/r64146_20211028_192652/
+/SAY/archive/YCGA-729009-YCGA-A2/archive/pacbio/data/r64146_20211028_192652.tar
+
+/gpfs/ycga/sequencers/pacbio/gw92/10x/Single_Cell/ha328/20220603_ha328_vdj
+/SAY/archive/YCGA-729009-YCGA-A2/archive/pacbio/gw92/10x/Single_Cell/ha328/20220603_ha328_vdj.tar
+s3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive/pacbio/gw92/10x/Single_Cell/ha328/20220603_ha328_vdj.tar
+
+'''
+def fatal(s):
+    logger.error(s)
+    exit(1)
+
+def checkForBroken(path):
+    ok=True
+    for d, ds, fs in os.walk(path, followlinks=True):
+        for f in fs:
+            path=os.path.join(d, f)
+            if os.path.islink(path):
+                target=os.readlink(path)
+                if not os.path.isabs(target):
+                    target=os.path.join(os.path.dirname(path), target)
+                if not os.path.exists(target):
+                    ok=False
+    return ok
+
+'''
+
+'''
+
+def target2tar(target):
+    logger.debug(f"looking for {target}")
+    objpath=target.replace('/gpfs/ycga/sequencers', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive')
+    return target2tarRec(objpath)
+
+def target2tarRec(objpath, level=0):
+    if level>3:
+           fatal(f"No tarfile found")
+    logger.debug(f"looking for {objpath}")
+    tarfile=objpath+".tar"
+    debugcmd=f"aws --cli-connect-timeout=300 --endpoint-url=https://s3.us-east-1.wasabisys.com s3 ls {tarfile} > /dev/null"
+    cmd=f"{aws_keys} {debugcmd}"
+    logger.debug(cmd)
+    ret=subprocess.call(cmd, shell=True)
+    if ret==0:
+        logger.debug(f"found tarfile {tarfile}")
+        return tarfile
+    else:
+        targetDir, basename=os.path.split(objpath)
+        return target2tarRec(targetDir, level+1)
+
+def ObjectDownload(objpath, dest):
+    debugcmd= f"aws --cli-connect-timeout=300 --endpoint-url=https://s3.us-east-1.wasabisys.com s3 cp {objpath} {dest}"
+    cmd=f"{aws_keys} {debugcmd}"
+
+    logger.debug(debugcmd)
+    ret=subprocess.call(cmd, shell=True)
+    
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("url")
+    parser.add_argument("-c", "--copy", dest="copy", action="store_true", default=False, help="force copy")
+    parser.add_argument("-d", "--dest", dest="dest", default=None, help="destination")
+    parser.add_argument("-n", "--dryrun", dest="dryrun", action="store_true", default=False, help="don't actually do anything")
+    parser.add_argument("-v", "--verbose", dest="verbose", action="store_true", default=False, help="be verbose")
+    o=parser.parse_args()
+    
+    # set up logging
+    logger=logging.getLogger('archive')
+    formatter=logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    logger.setLevel(logging.DEBUG if o.verbose else logging.INFO)
+    hc=logging.StreamHandler()
+    hc.setFormatter(formatter)
+    logger.addHandler(hc)
+
+    h=logging.FileHandler('extLinks.log')
+    h.setLevel(logging.INFO)
+    h.setFormatter(formatter)
+    logger.addHandler(h)
+
+    logger.debug(o)
+    logger.info(f"{os.getuid()} made request to retrieve {o.url}")
+                 
+    mo=urlpat.match(o.url)
+    if not mo:
+        fatal(f"Bad URL: {o.url}")
+
+    randomdir, staging = mo.groups()
+    ExtLinkDir=os.path.join(ELData, randomdir, staging)
+    logger.debug(f"ExtLinkDir {ExtLinkDir}")
+    if not os.path.islink(ExtLinkDir):
+        fatal(f"ExtLinkDir non-Existent: {ExtLinkDir}")
+
+    StageDir=os.readlink(ExtLinkDir)
+    logger.debug(f"StageDir {StageDir}")
+    if not os.path.isdir(StageDir):
+        fatal(f"StageDir non-existent: {StageDir}")
+
+    if not o.dest:
+        o.dest=os.path.basename(StageDir)
+    
+    # check that contents of stagedir, which most likely are links, actually exist
+    ok=checkForBroken(StageDir)
+    logger.debug(f"StageDir ok: {ok}")
+    
+    if ok and not o.copy:
+        # we'll just make a link and call it a day
+        logger.debug(f"symlink {StageDir} {o.dest}")
+        if not o.dryrun: os.symlink(StageDir, o.dest)
+    elif ok and o.copy:
+        cmd=f"rsync -aL {StageDir}/ {o.dest}"
+        logger.info(f"Doing a local rsync, please be patient")
+        logger.debug(cmd)
+        if not o.dryrun: ret=os.system(cmd)
+        if ret!=0: fatal("rsync failed")
+    else:
+        # need to figure out where archive is, pull tarball, and untar it
+        # pick a link from the stagedir, remove the last element, and cross our fingers
+        testlink=os.listdir(StageDir)[-1]
+        testtarget=os.readlink(os.path.join(StageDir, testlink))
+        object=target2tar(testtarget)
+        tarball=os.path.basename(object)
+        logger.info(f"Doing an S3 download of {tarball} to {o.dest}, please be patient")
+        if not o.dryrun: ObjectDownload(object, os.path.join(o.dest, tarball))
