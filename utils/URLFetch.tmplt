@@ -12,7 +12,7 @@ need to be able to do a aws copy using my keys, without giving keys away
 # keys will be inserted here
 KEYSXXXXXXXXXXKEYS
 
-import sys, os, argparse, re, logging, subprocess
+import sys, os, argparse, re, logging, subprocess, datetime
 
 
 urlpat=re.compile('^http://fcb.ycga.yale.edu:3010/([^/]+)/([^/]+)$')
@@ -51,16 +51,15 @@ def checkForBroken(path):
     return ok
 
 '''
-
+Need to handle /gpfs/ycga/sequencers and /ycga-gpfs/sequencers
 '''
-
 def target2tar(target):
     logger.debug(f"looking for {target}")
-    objpath=target.replace('/gpfs/ycga/sequencers', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive')
+    objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive', target)
     return target2tarRec(objpath)
 
 def target2tarRec(objpath, level=0):
-    if level>3:
+    if level>4:
            fatal(f"No tarfile found")
     logger.debug(f"looking for {objpath}")
     tarfile=objpath+".tar"
@@ -74,7 +73,7 @@ def target2tarRec(objpath, level=0):
     else:
         targetDir, basename=os.path.split(objpath)
         return target2tarRec(targetDir, level+1)
-
+	
 def ObjectDownload(objpath, dest):
     debugcmd= f"aws --cli-connect-timeout=300 --endpoint-url=https://s3.us-east-1.wasabisys.com s3 cp {objpath} {dest}"
     cmd=f"{aws_keys} {debugcmd}"
@@ -98,15 +97,15 @@ if __name__=='__main__':
     hc=logging.StreamHandler()
     hc.setFormatter(formatter)
     logger.addHandler(hc)
-
-    h=logging.FileHandler('extLinks.log')
-    h.setLevel(logging.INFO)
-    h.setFormatter(formatter)
-    logger.addHandler(h)
-
     logger.debug(o)
-    logger.info(f"{os.getuid()} made request to retrieve {o.url}")
-                 
+
+
+    # log each request
+    logfile=open('/gpfs/ycga/project/lsprog/tools/external/logs/URLFetch.log', 'a')
+    start = datetime.datetime.now() # current date and time
+    logfile.write(f'{start.strftime("%m/%d/%Y, %H:%M:%S")}: {os.getuid()} made request to retrieve {o.url}\n')
+    logfile.flush()
+    
     mo=urlpat.match(o.url)
     if not mo:
         fatal(f"Bad URL: {o.url}")
@@ -148,3 +147,7 @@ if __name__=='__main__':
         tarball=os.path.basename(object)
         logger.info(f"Doing an S3 download of {tarball} to {o.dest}, please be patient")
         if not o.dryrun: ObjectDownload(object, os.path.join(o.dest, tarball))
+
+    now = datetime.datetime.now() # current date and time
+    logfile.write(f'{now.strftime("%m/%d/%Y, %H:%M:%S")}: {os.getuid()} finished request to retrieve {o.url}.  time {now-start}. \n')
+    logfile.flush()
