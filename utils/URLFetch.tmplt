@@ -65,7 +65,7 @@ def target2tarRec(objpath, level=0):
     tarfile=objpath+".tar"
     debugcmd=f"aws --cli-connect-timeout=300 --endpoint-url=https://s3.us-east-1.wasabisys.com s3 ls {tarfile} > /dev/null"
     cmd=f"{aws_keys} {debugcmd}"
-    logger.debug(cmd)
+    logger.debug(debugcmd)
     ret=subprocess.call(cmd, shell=True)
     if ret==0:
         logger.debug(f"found tarfile {tarfile}")
