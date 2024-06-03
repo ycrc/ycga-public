@@ -130,8 +130,8 @@ if __name__=='__main__':
     
     if ok and not o.copy:
         # we'll just make a link and call it a day
-        logger.debug(f"symlink {StageDir} {o.dest}")
-        if not o.dryrun: os.symlink(StageDir, o.dest)
+        logger.debug(f"symlink {ExtLinkDir} {o.dest}")
+        if not o.dryrun: os.symlink(ExtLinkDir, o.dest)
     elif ok and o.copy:
         cmd=f"rsync -aL {StageDir}/ {o.dest}"
         logger.info(f"Doing a local rsync, please be patient")
