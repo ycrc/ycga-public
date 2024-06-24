@@ -35,7 +35,7 @@ s3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive/pacbio/gw
 '''
 def fatal(s):
     logger.error(s)
-    exit(1)
+    sys.exit(1)
 
 def checkForBroken(path):
     ok=True
@@ -55,8 +55,8 @@ Need to handle /gpfs/ycga/sequencers and /ycga-gpfs/sequencers
 '''
 def target2tar(target):
     logger.debug(f"looking for {target}")
-     realtarget=os.path.realpath(target)
-     if target!=realtarget:
+    realtarget=os.path.realpath(target)
+    if target!=realtarget:
          target=realtarget
          logger.debug(f"really {target}")
     objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive', target)
@@ -74,7 +74,9 @@ def target2tarRec(objpath, level=0):
     if ret==0:
         logger.debug(f"found tarfile {tarfile}")
         return tarfile
-    else:
+    elif ret==127: # couldn't find aws?
+        fatal(f"FAILED: {debugcmd}")
+    else:  # command worked, but file not found?
         targetDir, basename=os.path.split(objpath)
         return target2tarRec(targetDir, level+1)
 	
