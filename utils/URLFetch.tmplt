@@ -55,6 +55,10 @@ Need to handle /gpfs/ycga/sequencers and /ycga-gpfs/sequencers
 '''
 def target2tar(target):
     logger.debug(f"looking for {target}")
+     realtarget=os.path.realpath(target)
+     if target!=realtarget:
+         target=realtarget
+         logger.debug(f"really {target}")
     objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive', target)
     return target2tarRec(objpath)
 
