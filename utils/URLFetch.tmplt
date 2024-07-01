@@ -15,7 +15,7 @@ KEYSXXXXXXXXXXKEYS
 import sys, os, argparse, re, logging, subprocess, datetime
 
 
-urlpat=re.compile('^http://fcb.ycga.yale.edu:3010/([^/]+)/([^/]+)$')
+urlpat=re.compile('^http://fcb.ycga.yale.edu:3010/([^/]+)/([^/]+)/?$')
 epilog="epilog"
 
 ELData='/gpfs/ycga/project/lsprog/tools/external/data'
