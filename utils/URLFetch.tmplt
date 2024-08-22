@@ -37,6 +37,25 @@ def fatal(s):
     logger.error(s)
     sys.exit(1)
 
+'''
+
+The logic here:
+1) dereference the URL provided to the staging dir
+2) look through all links in the staging dir.  If they are readable, we can just make links.
+3) There are 2 reasons the links might not be readable:
+  a) the user doesn't have permission in some superdirectory (most likely the 'netid' dir)
+  b) the data has been archived and deleted.
+In case 1), we want to return a sensible error message
+In case 2), we want to look for a tarball in the archive and pull it down
+
+To find the tarball, find the .deleted file, and convert to the bucket location
+
+We'll also check that the user can read the deleted file.  To prevent unauthorized access, we will:
+- use group or user acls on all new style netid dirs
+- use acls directly on these .deleted files if netid dirs don't exist
+
+'''
+
 def checkForBroken(path):
     ok=True
     for d, ds, fs in os.walk(path, followlinks=True):
@@ -59,34 +78,61 @@ def target2tar(target):
     if target!=realtarget:
          target=realtarget
          logger.debug(f"really {target}")
-    objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive', target)
-    return target2tarRec(objpath)
 
-def target2tarRec(objpath, level=0):
-    if level>4:
-           fatal(f"No tarfile found")
-    logger.debug(f"looking for {objpath}")
-    tarfile=objpath+".tar"
-    debugcmd=f"aws --cli-connect-timeout=300 --endpoint-url=https://s3.us-east-1.wasabisys.com s3 ls {tarfile} > /dev/null"
-    cmd=f"{aws_keys} {debugcmd}"
-    logger.debug(debugcmd)
-    ret=subprocess.call(cmd, shell=True)
-    if ret==0:
-        logger.debug(f"found tarfile {tarfile}")
-        return tarfile
-    elif ret==127: # couldn't find aws?
-        fatal(f"FAILED: {debugcmd}")
-    else:  # command worked, but file not found?
-        targetDir, basename=os.path.split(objpath)
-        return target2tarRec(targetDir, level+1)
-	
-def ObjectDownload(objpath, dest):
-    debugcmd= f"aws --cli-connect-timeout=300 --endpoint-url=https://s3.us-east-1.wasabisys.com s3 cp {objpath} {dest}"
-    cmd=f"{aws_keys} {debugcmd}"
+    if os.path.exists(target):
+        fatal(f"If we get here, Target {target} should not be readable")
 
-    logger.debug(debugcmd)
-    ret=subprocess.call(cmd, shell=True)
+    '''
+    look up the path, searching for a file with ".deleted" appended, indicating that the
+    data was archived.  Also check that we can read the .deleted file
+    '''
+
+    archived=False
+    while target != '/':
+        dfile=target+".deleted"
+        logger.debug(f"checking for {dfile}")
+        if os.path.exists(dfile) and os.access(dfile, os.R_OK):
+            archived=True
+            logger.debug(f"found {dfile}")
+            break
+        target=os.path.dirname(target)
+
+    if not archived:
+        logger.info("No archive found")
+        return
+
+    ''' 
+    using the location of the .deleted file, check for the archived tarball.  The original 
+    directory name is now in 'target'
+    '''
+
+    targettar=target+".tar"
     
+    # first try normal location
+    objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive', targettar)
+    ret=downloadObj(objpath)
+    if ret==0: return ret
+
+    # next try artico location
+    objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/artico/archive', targettar)
+    ret=downloadObj(objpath)
+    if ret==0: return ret
+    logger.info("No archive found")
+    return 1
+
+def downloadObj(objpath):
+    if o.dryrun:
+        debugcmd= f"aws --cli-connect-timeout=300 --endpoint-url=https://s3.us-east-1.wasabisys.com s3 ls {objpath}"
+        cmd=f"{aws_keys} {debugcmd}"
+    else:
+        debugcmd= f"aws --cli-connect-timeout=300 --endpoint-url=https://s3.us-east-1.wasabisys.com s3 cp {objpath} {o.dest}/"
+        cmd=f"{aws_keys} {debugcmd}"
+
+    logger.info(f"Found archived file\nDoing {debugcmd}\nPlease be patient")
+    ret=subprocess.call(cmd, shell=True)
+    logger.debug(f"aws cmd returned {ret}")
+    return ret
+
 if __name__=='__main__':
     parser=argparse.ArgumentParser(epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("url")
@@ -133,27 +179,39 @@ if __name__=='__main__':
     # check that contents of stagedir, which most likely are links, actually exist
     ok=checkForBroken(StageDir)
     logger.debug(f"StageDir ok: {ok}")
-    
+
     if ok and not o.copy:
         # we'll just make a link and call it a day
+        logger.info(f"Making links here: {o.dest}")
         logger.debug(f"symlink {ExtLinkDir} {o.dest}")
-        if not o.dryrun: os.symlink(ExtLinkDir, o.dest)
+        if not o.dryrun:
+            try:
+                os.symlink(ExtLinkDir, o.dest)
+            except FileExistsError:
+                logger.error(f"{o.dest} exists, cannot create link.  Delete it, or chose different destination using -d")
     elif ok and o.copy:
-        cmd=f"rsync -aL {StageDir}/ {o.dest}"
+        cmd=f'rsync {"--progress" if o.verbose else ""} -atL {StageDir}/ {o.dest}'
         logger.info(f"Doing a local rsync, please be patient")
         logger.debug(cmd)
-        if not o.dryrun: ret=os.system(cmd)
+        if not o.dryrun:
+            ret=os.system(cmd)
+        else:
+            ret=0
         if ret!=0: fatal("rsync failed")
     else:
         # need to figure out where archive is, pull tarball, and untar it
         # pick a link from the stagedir, remove the last element, and cross our fingers
         testlink=os.listdir(StageDir)[-1]
         testtarget=os.readlink(os.path.join(StageDir, testlink))
-        object=target2tar(testtarget)
+        ret=target2tar(testtarget)
+
+        '''
         tarball=os.path.basename(object)
         logger.info(f"Doing an S3 download of {tarball} to {o.dest}, please be patient")
         if not o.dryrun: ObjectDownload(object, os.path.join(o.dest, tarball))
+        '''
 
     now = datetime.datetime.now() # current date and time
     logfile.write(f'{now.strftime("%m/%d/%Y, %H:%M:%S")}: {os.getuid()} finished request to retrieve {o.url}.  time {now-start}. \n')
     logfile.flush()
+
