@@ -1,0 +1,81 @@
+
+'''
+TODO
+need to be able to do a aws copy using my keys, without giving keys away
+
+1) setuid program that runs as me and can access my keys.
+2) hide keys in this script, maybe by compiling it?
+3) in python, parse ini file, and pass values directly to boto3 (still need to do setuid though)
+
+'''
+
+# keys will be inserted here
+KEYSXXXXXXXXXXKEYS
+
+import sys, os, argparse, re, logging, subprocess, datetime
+
+'''
+/SAY/archive/YCGA-729009-YCGA-A2/archive/pacbio/gw92/10x/Single_Cell/gb557/20221128_gb557_5p.tar
+'''
+
+filenamepat=re.compile('^/SAY/archive/YCGA-729009-YCGA-A2/(artico/|)archive/(.+)$')
+epilog="epilog"
+
+''' Examples of target to tar:
+replace /gpfs/ycga/sequencers by /SAY/archive/YCGA-729009-YCGA-A2/archive and append .tar?
+
+/gpfs/ycga/sequencers/pacbio/data/r64146_20211028_192652/
+/SAY/archive/YCGA-729009-YCGA-A2/archive/pacbio/data/r64146_20211028_192652.tar
+
+/gpfs/ycga/sequencers/pacbio/gw92/10x/Single_Cell/ha328/20220603_ha328_vdj
+/SAY/archive/YCGA-729009-YCGA-A2/archive/pacbio/gw92/10x/Single_Cell/ha328/20220603_ha328_vdj.tar
+s3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive/pacbio/gw92/10x/Single_Cell/ha328/20220603_ha328_vdj.tar
+
+'''
+def fatal(s):
+    logger.error(s)
+    sys.exit(1)
+
+def ObjectDownload(objpath, dest):
+    debugcmd= f"aws --cli-connect-timeout=300 --endpoint-url=https://s3.us-east-1.wasabisys.com s3 cp {objpath} {dest}"
+    cmd=f"{aws_keys} {debugcmd}"
+
+    logger.debug(debugcmd)
+    ret=subprocess.call(cmd, shell=True)
+    
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("filename")
+    parser.add_argument("-d", "--dest", dest="dest", default='.', help="destination")
+    parser.add_argument("-n", "--dryrun", dest="dryrun", action="store_true", default=False, help="don't actually do anything")
+    parser.add_argument("-v", "--verbose", dest="verbose", action="store_true", default=False, help="be verbose")
+    o=parser.parse_args()
+    
+    # set up logging
+    logger=logging.getLogger('SAYFetch')
+    formatter=logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    logger.setLevel(logging.DEBUG if o.verbose else logging.INFO)
+    hc=logging.StreamHandler()
+    hc.setFormatter(formatter)
+    logger.addHandler(hc)
+    logger.debug(o)
+
+    # log each request
+    logfile=open('/gpfs/ycga/project/lsprog/tools/external/logs/SAYFetch.log', 'a')
+    start = datetime.datetime.now() # current date and time
+    logfile.write(f'{start.strftime("%m/%d/%Y, %H:%M:%S")}: {os.getuid()} made request to retrieve {o.filename}\n')
+    logfile.flush()
+    
+    mo=filenamepat.match(o.filename)
+    if not mo:
+        fatal(f"Bad path: {o.filename}")
+
+    filepath = mo.group(1)
+    objectpath = f's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/{mo.group(1)}archive/{mo.group(2)}'
+
+    logger.info(f"Doing an S3 download of {objectpath} to {o.dest}, please be patient")
+    if not o.dryrun: ObjectDownload(objectpath, o.dest)
+
+    now = datetime.datetime.now() # current date and time
+    logfile.write(f'{now.strftime("%m/%d/%Y, %H:%M:%S")}: {os.getuid()} finished request to retrieve {o.filename}.  time {now-start}. \n')
+    logfile.flush()
