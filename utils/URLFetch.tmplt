@@ -21,6 +21,16 @@ epilog="epilog"
 ELData='/gpfs/ycga/project/lsprog/tools/external/data'
 ArchiveRoot='/SAY/archive/YCGA-729009-YCGA-A2/archive'
 
+'''
+Examples of where to find .deleted files.
+
+/gpfs/ycga/sequencers/pacbio/gw92/10x/Single_Cell/20211207_cad99_3p.deleted
+/gpfs/ycga/sequencers/pacbio/gw92/10x/Single_Cell/netid/20211207_cad99_3p.deleted (eventual, none yet)
+/gpfs/ycga/sequencers/pacbio/data/PH40-Mosquito7-5D-010716_462.deleted
+
+need to figure out "runname", then look for runname.deleted in appropriate place.
+'''
+
 
 ''' Examples of target to tar:
 replace /gpfs/ycga/sequencers by /SAY/archive/YCGA-729009-YCGA-A2/archive and append .tar?
@@ -72,53 +82,41 @@ def checkForBroken(path):
 '''
 Need to handle /gpfs/ycga/sequencers and /ycga-gpfs/sequencers
 '''
-def target2tar(target):
-    logger.debug(f"looking for {target}")
-    realtarget=os.path.realpath(target)
-    if target!=realtarget:
-         target=realtarget
-         logger.debug(f"really {target}")
 
-    if os.path.exists(target):
-        fatal(f"If we get here, Target {target} should not be readable")
+tenXpat=re.compile(r'^/gpfs/ycga/sequencers/pacbio/gw92/10x/(?:Single_Cell|Exome|Genome)/(?:[a-z]+[0-9]+/)?(\d+_[^/]+)')
+PBpat = re.compile(r'^/gpfs/ycga/sequencers/pacbio/data/(r\d+_[^/]+)')
 
-    '''
-    look up the path, searching for a file with ".deleted" appended, indicating that the
-    data was archived.  Also check that we can read the .deleted file
-    '''
+def getTarball(target):
+    # first determine run type and run name from link
+    mo=tenXpat.match(target)
 
-    archived=False
-    while target != '/':
-        dfile=target+".deleted"
-        logger.debug(f"checking for {dfile}")
+    if not mo:
+        mo=PBpat.match(target)
+        
+    if mo:
+        dfile=mo.group(0)+'.deleted'
         if os.path.exists(dfile) and os.access(dfile, os.R_OK):
             archived=True
             logger.debug(f"found {dfile}")
-            break
-        target=os.path.dirname(target)
 
-    if not archived:
-        logger.info("No archive found")
-        return
+            tfile=mo.group(0)+'.tar'
+            # first try normal location
+            objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive', tfile)
+            ret=downloadObj(objpath)
+            if ret==0: return ret
 
-    ''' 
-    using the location of the .deleted file, check for the archived tarball.  The original 
-    directory name is now in 'target'
-    '''
-
-    targettar=target+".tar"
-    
-    # first try normal location
-    objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive', targettar)
-    ret=downloadObj(objpath)
-    if ret==0: return ret
-
-    # next try artico location
-    objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/artico/archive', targettar)
-    ret=downloadObj(objpath)
-    if ret==0: return ret
-    logger.info("No archive found")
-    return 1
+            # next try artico location
+            objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/artico/archive', tfile)
+            ret=downloadObj(objpath)
+            if ret==0: return ret
+            logger.info("No archive found")
+            return 1
+        else:
+            logger.debug("failed")
+            return 0
+    else:
+        logger.info("No tar archive found")
+        return 1
 
 def downloadObj(objpath):
     if o.dryrun:
@@ -144,7 +142,7 @@ if __name__=='__main__':
     
     # set up logging
     logger=logging.getLogger('archive')
-    formatter=logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    formatter=logging.Formatter("%(asctime)s %(levelname)s %(lineno)s %(message)s")
     logger.setLevel(logging.DEBUG if o.verbose else logging.INFO)
     hc=logging.StreamHandler()
     hc.setFormatter(formatter)
@@ -200,10 +198,22 @@ if __name__=='__main__':
         if ret!=0: fatal("rsync failed")
     else:
         # need to figure out where archive is, pull tarball, and untar it
-        # pick a link from the stagedir, remove the last element, and cross our fingers
-        testlink=os.listdir(StageDir)[-1]
-        testtarget=os.readlink(os.path.join(StageDir, testlink))
-        ret=target2tar(testtarget)
+        # find a link in the stagedir, remove the last element, and cross our fingers
+        testlink=None
+        for l in os.listdir(StageDir):
+            fn=os.path.join(StageDir, l)
+            if os.path.islink(fn):
+                testlink=fn
+                logger.debug(f"found link {testlink}")
+                break
+            
+        if testlink:
+            testtarget=os.readlink(testlink)
+            logger.debug(f"looking for {testtarget}")
+            ret=getTarball(testtarget)
+        else:
+            logger.info(f"No link found, giving up.")
+            
 
         '''
         tarball=os.path.basename(object)
