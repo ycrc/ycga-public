@@ -83,8 +83,14 @@ def checkForBroken(path):
 Need to handle /gpfs/ycga/sequencers and /ycga-gpfs/sequencers
 '''
 
-tenXpat=re.compile(r'^/gpfs/ycga/sequencers/pacbio/gw92/10x/(?:Single_Cell|Exome|Genome)/(?:[a-z]+[0-9]+/)?(\d+_[^/]+)')
-PBpat = re.compile(r'^/gpfs/ycga/sequencers/pacbio/data/(r\d+_[^/]+)')
+'''
+Guilin's links sometimes used the old gibbs path, so I have to check for both
+'''
+
+tenXpat=re.compile(r'^(?:/gpfs/ycga/sequencers|/gpfs/gibbs/pi/ycga)/pacbio/gw92/10x/(?:Single_Cell|Exome|Genome)/(?:[a-z]+[0-9]+/)?(\d+_[^/]+)')
+#tenXpat=re.compile(r'^/gpfs/ycga/sequencers/pacbio/gw92/10x/(?:Single_Cell|Exome|Genome)/(?:[a-z]+[0-9]+/)?(\d+_[^/]+)')
+PBpat = re.compile(r'^(?:/gpfs/ycga/sequencers|/gpfs/gibbs/pi/ycga)/pacbio/data/(r\d+_[^/]+)')
+#PBpat = re.compile(r'^/gpfs/ycga/sequencers/pacbio/data/(r\d+_[^/]+)')
 
 def getTarball(target):
     # first determine run type and run name from link
@@ -101,12 +107,12 @@ def getTarball(target):
 
             tfile=mo.group(0)+'.tar'
             # first try normal location
-            objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive', tfile)
+            objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers|/gpfs/gibbs/pi/ycga)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/archive', tfile)
             ret=downloadObj(objpath)
             if ret==0: return ret
 
             # next try artico location
-            objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/artico/archive', tfile)
+            objpath=re.sub('(/gpfs/ycga/sequencers|/ycga-gpfs/sequencers|/gpfs/gibbs/pi/ycga)', 's3://hpc-rsha-std-mult-000-a2/172.18.4.146/kc/.17712/data/1408/artico/archive', tfile)
             ret=downloadObj(objpath)
             if ret==0: return ret
             logger.info("No archive found")
